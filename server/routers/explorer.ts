@@ -1893,4 +1893,78 @@ async function getTopUsersFallback(ctx: any, category: string, limit: number) {
   return result;
 }
 
+// Add API bridge mutation for external API integration
+const explorerRouterWithBridge = explorerRouter.extend({
+  addAgentFromAPI: publicProcedure
+    .input(
+      z.object({
+        agent_config: z.object({
+          agent_name: z.string(),
+          description: z.string(),
+          system_prompt: z.string(),
+          model_name: z.string().optional(),
+          temperature: z.number().optional(),
+          max_tokens: z.number().optional(),
+          max_loops: z.number().optional(),
+        }),
+        marketplace_metadata: z.object({
+          tags: z.array(z.string()).optional(),
+          category: z.string().optional(),
+          use_cases: z.array(z.string()).optional(),
+          links: z.array(z.object({
+            name: z.string(),
+            url: z.string(),
+          })).optional(),
+        }).optional(),
+        user_id: z.string(),
+        result: z.any().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { agent_config, marketplace_metadata, user_id, result } = input;
+
+      // Map API data to registry format
+      const registryData = {
+        name: agent_config.agent_name || 'Unnamed Agent',
+        description: agent_config.description || `Agent: ${agent_config.agent_name}`,
+        agent: agent_config.system_prompt || '',
+        user_id: user_id,
+        tags: marketplace_metadata?.tags?.join(',') || null,
+        category: marketplace_metadata?.category || null,
+        use_cases: marketplace_metadata?.use_cases || null,
+        links: marketplace_metadata?.links || [],
+        is_free: true,
+        status: 'approved' as const,
+        language: 'python',
+        requirements: [],
+        image_url: null,
+        file_path: null,
+        price_usd: 0,
+        seller_wallet_address: null,
+      };
+
+      // Insert into swarms_cloud_agents table
+      const { data, error } = await ctx.supabase
+        .from('swarms_cloud_agents')
+        .insert([registryData])
+        .select('id')
+        .single();
+
+      if (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create agent in registry',
+        });
+      }
+
+      return {
+        success: true,
+        agent_id: data.id,
+        registry_url: `/agent/${data.id}`,
+        message: 'Agent successfully created in registry',
+      };
+    }),
+});
+
+export default explorerRouterWithBridge;
 export default explorerRouter;
